@@ -1,0 +1,450 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Plus, 
+  Trash2, 
+  ShoppingCart, 
+  Refrigerator, 
+  ChefHat, 
+  AlertTriangle, 
+  Calendar,
+  CheckCircle2,
+  ChevronRight,
+  Sparkles,
+  Search,
+  Minus
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const INITIAL_FRIDGE = [
+  { id: 1, name: 'Eggs', quantity: '12', type: 'pcs', expiry: '2026-04-10', lowStock: false },
+  { id: 2, name: 'Milk', quantity: '1', type: 'L', expiry: '2026-04-05', lowStock: true },
+  { id: 3, name: 'Spinach', quantity: '200', type: 'g', expiry: '2026-04-02', lowStock: false },
+];
+
+const INITIAL_GROCERY = [
+  { id: 101, name: 'Bread', quantity: '1', type: 'loaf' },
+  { id: 102, name: 'Butter', quantity: '250', type: 'g' },
+];
+
+function App() {
+  const [fridgeItems, setFridgeItems] = useState(() => {
+    const saved = localStorage.getItem('sk_fridge');
+    return saved ? JSON.parse(saved) : INITIAL_FRIDGE;
+  });
+  const [groceryItems, setGroceryItems] = useState(() => {
+    const saved = localStorage.getItem('sk_grocery');
+    return saved ? JSON.parse(saved) : INITIAL_GROCERY;
+  });
+  const [activeTab, setActiveTab] = useState('fridge');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', quantity: '', type: 'pcs', expiry: '' });
+
+  useEffect(() => {
+    localStorage.setItem('sk_fridge', JSON.stringify(fridgeItems));
+  }, [fridgeItems]);
+
+  useEffect(() => {
+    localStorage.setItem('sk_grocery', JSON.stringify(groceryItems));
+  }, [groceryItems]);
+
+  const addItemToFridge = () => {
+    if (!newItem.name) return;
+    
+    setFridgeItems(prev => {
+      const existing = prev.find(item => item.name.toLowerCase() === newItem.name.toLowerCase());
+      
+      if (existing) {
+        // Merge with existing item
+        const newQty = parseFloat(existing.quantity || 0) + parseFloat(newItem.quantity || 0);
+        const lowStockItems = ['egg', 'milk'];
+        const isLow = lowStockItems.includes(existing.name.toLowerCase()) && newQty <= 1;
+
+        return prev.map(item => 
+          item.id === existing.id 
+            ? { ...item, quantity: newQty.toString(), lowStock: isLow }
+            : item
+        );
+      } else {
+        // Add as new item
+        const qtyNum = parseFloat(newItem.quantity);
+        const lowStockItems = ['egg', 'milk'];
+        const isLow = lowStockItems.includes(newItem.name.toLowerCase()) && qtyNum <= 1;
+        return [...prev, { ...newItem, lowStock: isLow, id: Date.now() }];
+      }
+    });
+
+    setNewItem({ name: '', quantity: '', type: 'pcs', expiry: '' });
+    setShowAddModal(false);
+  };
+
+  const addItemToGrocery = (name) => {
+    const item = { id: Date.now(), name, quantity: '1', type: 'pcs' };
+    setGroceryItems([...groceryItems, item]);
+  };
+
+  const purchaseItem = (id) => {
+    const purchasedItem = groceryItems.find(i => i.id === id);
+    setGroceryItems(groceryItems.filter(i => i.id !== id));
+    
+    setFridgeItems(prev => {
+      const existing = prev.find(item => item.name.toLowerCase() === purchasedItem.name.toLowerCase());
+      
+      if (existing) {
+        const newQty = parseFloat(existing.quantity || 0) + parseFloat(purchasedItem.quantity || 0);
+        const lowStockItems = ['egg', 'milk'];
+        const isLow = lowStockItems.includes(existing.name.toLowerCase()) && newQty <= 1;
+
+        return prev.map(item => 
+          item.id === existing.id 
+            ? { ...item, quantity: newQty.toString(), lowStock: isLow }
+            : item
+        );
+      } else {
+        const qtyNum = parseFloat(purchasedItem.quantity);
+        const lowStockItems = ['egg', 'milk'];
+        const isLow = lowStockItems.includes(purchasedItem.name.toLowerCase()) && qtyNum <= 1;
+        return [...prev, { ...purchasedItem, id: Date.now(), expiry: '', lowStock: isLow }];
+      }
+    });
+  };
+
+  const deleteFridgeItem = (id) => {
+    setFridgeItems(fridgeItems.filter(i => i.id !== id));
+  };
+
+  const deleteGroceryItem = (id) => {
+    setGroceryItems(groceryItems.filter(i => i.id !== id));
+  };
+
+  // Recipe Suggestion Logic (MVP simple keyword matching)
+  const recipes = [
+    { 
+      name: 'Omelette with Spinach', 
+      ingredients: ['Eggs', 'Spinach'], 
+      steps: 'Whisk eggs, saute spinach, pour eggs over spinach and cook until firm.' 
+    },
+    { 
+      name: 'Creamy Milk Pasta', 
+      ingredients: ['Milk', 'Butter', 'Pasta'], 
+      steps: 'Boil pasta, make sauce with butter and milk, mix and serve.' 
+    },
+    { 
+      name: 'Simple Salad', 
+      ingredients: ['Spinach', 'Tomato', 'Cucumber'], 
+      steps: 'Toss spinach with chopped tomato and cucumber. Add light dressing.' 
+    }
+  ];
+
+  const suggestedRecipes = recipes.filter(recipe => 
+    recipe.ingredients.some(ing => 
+      fridgeItems.some(item => item.name.toLowerCase().includes(ing.toLowerCase()))
+    )
+  );
+
+  return (
+    <div className="app-container">
+      <header style={{ marginBottom: '1.5rem', textAlign: 'center', paddingTop: '1rem' }}>
+        <h1 style={{ color: 'var(--primary)', marginBottom: '0.2rem', fontSize: '1.8rem' }}>Smart Kitchen</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Helping Moms stay organized ✨</p>
+      </header>
+
+      {/* Stats Quick View */}
+      <div className="stats-grid animate">
+        <div 
+          className={`glass-card ${activeTab === 'fridge' ? 'active-card' : ''}`} 
+          style={{ padding: '1rem', textAlign: 'center', cursor: 'pointer', transition: 'all 0.3s' }}
+          onClick={() => setActiveTab('fridge')}
+        >
+          <div style={{ color: 'var(--primary)', marginBottom: '0.3rem' }}><Refrigerator size={20} style={{ margin: '0 auto' }} /></div>
+          <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fridge</h4>
+          <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>{fridgeItems.length}</p>
+        </div>
+        <div 
+          className={`glass-card ${activeTab === 'grocery' ? 'active-card' : ''}`} 
+          style={{ padding: '1rem', textAlign: 'center', cursor: 'pointer', transition: 'all 0.3s' }}
+          onClick={() => setActiveTab('grocery')}
+        >
+          <div style={{ color: 'var(--secondary)', marginBottom: '0.3rem' }}><ShoppingCart size={20} style={{ margin: '0 auto' }} /></div>
+          <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Grocery</h4>
+          <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>{groceryItems.length}</p>
+        </div>
+      </div>
+
+      <AnimatePresence mode="wait">
+        {activeTab === 'fridge' && (
+          <motion.div 
+            key="fridge"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.3rem' }}>Fridge Inventory</h2>
+              <button 
+                className="btn btn-primary" 
+                style={{ padding: '0.5rem 1rem', borderRadius: '0.8rem' }}
+                onClick={() => setShowAddModal(true)}
+              >
+                <Plus size={18} /> Add
+              </button>
+            </div>
+
+            <div className="glass-card" style={{ minHeight: '300px' }}>
+              {fridgeItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+                  <Refrigerator size={40} style={{ opacity: 0.2, marginBottom: '1rem' }} />
+                  <p style={{ color: 'var(--text-muted)' }}>Your fridge is empty. Time to stock up!</p>
+                </div>
+              ) : (
+                fridgeItems.map(item => (
+                  <div key={item.id} className="item-row">
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: '600' }}>{item.name}</h3>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.4rem' }}>
+                        <span className="badge" style={{ background: 'rgba(0,0,0,0.04)' }}>{item.quantity} {item.type}</span>
+                        {item.expiry && (
+                          <span className={`badge ${new Date(item.expiry) < new Date() ? 'badge-expired' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <Calendar size={12} /> {item.expiry}
+                          </span>
+                        )}
+                        {item.lowStock && (
+                          <span className="badge badge-low" style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <AlertTriangle size={12} /> Low
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {item.lowStock && (
+                        <button 
+                          className="btn" 
+                          style={{ padding: '0.4rem', background: 'rgba(78, 205, 196, 0.1)', color: 'var(--secondary)' }}
+                          title="Add to grocery list"
+                          onClick={() => addItemToGrocery(item.name)}
+                        >
+                          <ShoppingCart size={18} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => deleteFridgeItem(item.id)} 
+                        style={{ background: 'none', border: 'none', color: '#ff7675', cursor: 'pointer', padding: '0.5rem' }}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'grocery' && (
+          <motion.div 
+            key="grocery"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <div className="section-header" style={{ marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.3rem' }}>Grocery List</h2>
+            </div>
+
+            <div className="glass-card" style={{ padding: '1.2rem', minHeight: '300px' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <input 
+                  className="input-field" 
+                  placeholder="What else do we need? (e.g. Cheese)" 
+                  style={{ marginBottom: 0, flex: 1 }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && e.target.value) {
+                      addItemToGrocery(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </div>
+
+              {groceryItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+                  <CheckCircle2 size={40} style={{ color: 'var(--secondary)', opacity: 0.3, marginBottom: '1rem' }} />
+                  <p style={{ color: 'var(--text-muted)' }}>All items purchased! You're amazing. 🌟</p>
+                </div>
+              ) : (
+                groceryItems.map(item => (
+                  <div key={item.id} className="item-row">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                      <button 
+                        onClick={() => purchaseItem(item.id)}
+                        className="btn-check"
+                        style={{ 
+                          border: '2px solid var(--secondary)', 
+                          borderRadius: '50%', 
+                          width: '28px', 
+                          height: '28px', 
+                          background: 'none', 
+                          cursor: 'pointer', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <ShoppingCart size={14} color="var(--secondary)" />
+                      </button>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: '500' }}>{item.name}</h3>
+                    </div>
+                    <button 
+                      onClick={() => deleteGroceryItem(item.id)}
+                      style={{ background: 'none', border: 'none', color: '#ff7675', cursor: 'pointer', padding: '0.5rem' }}
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '1rem' }}>
+              Tip: Click the cart icon when you buy an item to move it to the fridge!
+            </p>
+          </motion.div>
+        )}
+
+        {activeTab === 'meals' && (
+          <motion.div 
+            key="meals"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <div className="section-header" style={{ marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.3rem' }}>Recipe Ideas</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Magical meals from your current stock</p>
+            </div>
+
+            {suggestedRecipes.length === 0 ? (
+              <div className="glass-card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+                <ChefHat size={48} color="var(--primary)" style={{ opacity: 0.2, marginBottom: '1.5rem' }} />
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Not enough items for suggestions yet.</p>
+                <button className="btn btn-primary" onClick={() => setActiveTab('fridge')} style={{ margin: '0 auto' }}>
+                  Add Fridge Items
+                </button>
+              </div>
+            ) : (
+              suggestedRecipes.map((recipe, idx) => (
+                <motion.div 
+                  key={idx} 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.1 }}
+                  className="glass-card" 
+                  style={{ borderLeft: '5px solid var(--primary)', padding: '1.2rem' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
+                    <h3 style={{ color: 'var(--primary)', fontSize: '1.2rem' }}>{recipe.name}</h3>
+                    <Sparkles size={18} color="var(--accent)" />
+                  </div>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      {recipe.ingredients.map((ing, i) => (
+                        <span key={i} className="badge" style={{ background: 'rgba(78, 205, 196, 0.08)', color: 'var(--secondary)', fontSize: '0.75rem' }}>
+                          <CheckCircle2 size={12} style={{ marginRight: '3px' }} /> {ing}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ padding: '1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '1rem', fontSize: '0.9rem', lineHeight: '1.5', color: '#444' }}>
+                    {recipe.steps}
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Modal */}
+      <AnimatePresence>
+        {showAddModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="glass-card" 
+              style={{ width: '100%', maxWidth: '400px', background: 'white', padding: '2rem' }}
+            >
+              <h2 style={{ marginBottom: '1.5rem', color: 'var(--primary)' }}>New Fridge Item</h2>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.4rem', display: 'block' }}>ITEM NAME</label>
+                <input 
+                  className="input-field" 
+                  placeholder="e.g. Greek Yogurt" 
+                  value={newItem.name} 
+                  autoFocus
+                  onChange={e => setNewItem({...newItem, name: e.target.value})}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.4rem', display: 'block' }}>QUANTITY</label>
+                  <input 
+                    className="input-field" 
+                    type="number" 
+                    value={newItem.quantity} 
+                    onChange={e => setNewItem({...newItem, quantity: e.target.value})}
+                  />
+                </div>
+                <div style={{ width: '100px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.4rem', display: 'block' }}>UNIT</label>
+                  <select 
+                    className="input-field" 
+                    value={newItem.type}
+                    onChange={e => setNewItem({...newItem, type: e.target.value})}
+                  >
+                    <option value="pcs">pcs</option>
+                    <option value="kg">kg</option>
+                    <option value="g">g</option>
+                    <option value="L">L</option>
+                    <option value="box">box</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: '2rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.4rem', display: 'block' }}>EXPIRY DATE (OPTIONAL)</label>
+                <input 
+                  className="input-field" 
+                  type="date" 
+                  value={newItem.expiry} 
+                  onChange={e => setNewItem({...newItem, expiry: e.target.value})}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={addItemToFridge}>Save Item</button>
+                <button className="btn" style={{ flex: 1, background: '#f5f5f5' }} onClick={() => setShowAddModal(false)}>Cancel</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Navigation */}
+      <nav className="nav-bar">
+        <button className={`nav-item ${activeTab === 'fridge' ? 'active' : ''}`} onClick={() => setActiveTab('fridge')}>
+          <Refrigerator size={24} />
+          <span>Fridge</span>
+        </button>
+        <button className={`nav-item ${activeTab === 'grocery' ? 'active' : ''}`} onClick={() => setActiveTab('grocery')}>
+          <ShoppingCart size={24} />
+          <span>Grocery</span>
+        </button>
+        <button className={`nav-item ${activeTab === 'meals' ? 'active' : ''}`} onClick={() => setActiveTab('meals')}>
+          <ChefHat size={24} />
+          <span>Meals</span>
+        </button>
+      </nav>
+    </div>
+  );
+}
+
+export default App;
