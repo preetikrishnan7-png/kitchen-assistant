@@ -10,12 +10,14 @@ import {
   CheckCircle2,
   Sparkles,
   Loader2,
-  LogOut
+  LogOut,
+  Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, auth } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Auth from './Auth';
+import AdminPanel from './AdminPanel';
 import {
   collection,
   onSnapshot,
@@ -29,6 +31,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 
+const ADMIN_EMAIL = 'preetikrishnan7@gmail.com';
 const LOW_STOCK_ITEMS = ['egg', 'milk'];
 
 function isLowStock(name, quantity) {
@@ -430,6 +433,10 @@ function App() {
             )}
           </motion.div>
         )}
+
+        {activeTab === 'admin' && user?.email === ADMIN_EMAIL && (
+          <AdminPanel />
+        )}
       </AnimatePresence>
 
       {/* Add Modal */}
@@ -511,6 +518,12 @@ function App() {
           <ChefHat size={24} />
           <span>Meals</span>
         </button>
+        {user?.email === ADMIN_EMAIL && (
+          <button className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`} onClick={() => setActiveTab('admin')}>
+            <Shield size={24} />
+            <span>Admin</span>
+          </button>
+        )}
       </nav>
     </div>
   );

@@ -3,10 +3,36 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup
+  signInWithPopup,
+  signOut,
+  updateProfile
 } from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
+import { auth, googleProvider, db } from './firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { ChefHat, Mail, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+
+const ADMIN_EMAIL = 'preetikrishnan7@gmail.com';
+
+async function saveUserProfile(user, displayName) {
+  const ref = doc(db, 'userProfiles', user.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      uid: user.uid,
+      email: user.email,
+      displayName: displayName || user.displayName || user.email?.split('@')[0],
+      createdAt: Date.now(),
+      revoked: false
+    });
+  }
+}
+
+async function checkRevoked(user) {
+  if (user.email === ADMIN_EMAIL) return false;
+  const ref = doc(db, 'userProfiles', user.uid);
+  const snap = await getDoc(ref);
+  return snap.exists() && snap.data().revoked === true;
+}
 
 export default function Auth() {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
@@ -23,10 +49,21 @@ export default function Auth() {
     setError('');
     setLoading(true);
     try {
+      let userCred;
       if (mode === 'signup') {
-        await createUserWithEmailAndPassword(auth, email, password);
+        userCred = await createUserWithEmailAndPassword(auth, email, password);
+        if (name) await updateProfile(userCred.user, { displayName: name });
+        await saveUserProfile(userCred.user, name);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        userCred = await signInWithEmailAndPassword(auth, email, password);
+        await saveUserProfile(userCred.user);
+        const revoked = await checkRevoked(userCred.user);
+        if (revoked) {
+          await signOut(auth);
+          setError('Your access has been revoked. Please contact the admin.');
+          setLoading(false);
+          return;
+        }
       }
     } catch (err) {
       setError(friendlyError(err.code));
@@ -39,7 +76,14 @@ export default function Auth() {
     setError('');
     setLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const userCred = await signInWithPopup(auth, googleProvider);
+      await saveUserProfile(userCred.user);
+      const revoked = await checkRevoked(userCred.user);
+      if (revoked) {
+        await signOut(auth);
+        setError('Your access has been revoked. Please contact the admin.');
+        return;
+      }
     } catch (err) {
       setError(friendlyError(err.code));
     } finally {
