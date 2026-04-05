@@ -8,112 +8,132 @@ import {
   AlertTriangle, 
   Calendar,
   CheckCircle2,
-  ChevronRight,
   Sparkles,
-  Search,
-  Minus
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { db } from './firebase';
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+  setDoc,
+  getDocs,
+  query,
+  orderBy
+} from 'firebase/firestore';
 
-const INITIAL_FRIDGE = [
-  { id: 1, name: 'Eggs', quantity: '12', type: 'pcs', expiry: '2026-04-10', lowStock: false },
-  { id: 2, name: 'Milk', quantity: '1', type: 'L', expiry: '2026-04-05', lowStock: true },
-  { id: 3, name: 'Spinach', quantity: '200', type: 'g', expiry: '2026-04-02', lowStock: false },
-];
+const FRIDGE_COLLECTION = 'fridgeItems';
+const GROCERY_COLLECTION = 'groceryItems';
 
-const INITIAL_GROCERY = [
-  { id: 101, name: 'Bread', quantity: '1', type: 'loaf' },
-  { id: 102, name: 'Butter', quantity: '250', type: 'g' },
-];
+const LOW_STOCK_ITEMS = ['egg', 'milk'];
+
+function isLowStock(name, quantity) {
+  return LOW_STOCK_ITEMS.includes(name.toLowerCase()) && parseFloat(quantity) <= 1;
+}
 
 function App() {
-  const [fridgeItems, setFridgeItems] = useState(() => {
-    const saved = localStorage.getItem('sk_fridge');
-    return saved ? JSON.parse(saved) : INITIAL_FRIDGE;
-  });
-  const [groceryItems, setGroceryItems] = useState(() => {
-    const saved = localStorage.getItem('sk_grocery');
-    return saved ? JSON.parse(saved) : INITIAL_GROCERY;
-  });
+  const [fridgeItems, setFridgeItems] = useState([]);
+  const [groceryItems, setGroceryItems] = useState([]);
   const [activeTab, setActiveTab] = useState('fridge');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', quantity: '', type: 'pcs', expiry: '' });
+  const [loading, setLoading] = useState(true);
 
+  // Real-time listener for fridge items
   useEffect(() => {
-    localStorage.setItem('sk_fridge', JSON.stringify(fridgeItems));
-  }, [fridgeItems]);
-
-  useEffect(() => {
-    localStorage.setItem('sk_grocery', JSON.stringify(groceryItems));
-  }, [groceryItems]);
-
-  const addItemToFridge = () => {
-    if (!newItem.name) return;
-    
-    setFridgeItems(prev => {
-      const existing = prev.find(item => item.name.toLowerCase() === newItem.name.toLowerCase());
-      
-      if (existing) {
-        // Merge with existing item
-        const newQty = parseFloat(existing.quantity || 0) + parseFloat(newItem.quantity || 0);
-        const lowStockItems = ['egg', 'milk'];
-        const isLow = lowStockItems.includes(existing.name.toLowerCase()) && newQty <= 1;
-
-        return prev.map(item => 
-          item.id === existing.id 
-            ? { ...item, quantity: newQty.toString(), lowStock: isLow }
-            : item
-        );
-      } else {
-        // Add as new item
-        const qtyNum = parseFloat(newItem.quantity);
-        const lowStockItems = ['egg', 'milk'];
-        const isLow = lowStockItems.includes(newItem.name.toLowerCase()) && qtyNum <= 1;
-        return [...prev, { ...newItem, lowStock: isLow, id: Date.now() }];
-      }
+    const unsubFridge = onSnapshot(collection(db, FRIDGE_COLLECTION), (snapshot) => {
+      const items = snapshot.docs.map(d => ({ docId: d.id, ...d.data() }));
+      setFridgeItems(items);
+      setLoading(false);
     });
+
+    const unsubGrocery = onSnapshot(collection(db, GROCERY_COLLECTION), (snapshot) => {
+      const items = snapshot.docs.map(d => ({ docId: d.id, ...d.data() }));
+      setGroceryItems(items);
+    });
+
+    return () => {
+      unsubFridge();
+      unsubGrocery();
+    };
+  }, []);
+
+  const addItemToFridge = async () => {
+    if (!newItem.name) return;
+
+    const existing = fridgeItems.find(item => item.name.toLowerCase() === newItem.name.toLowerCase());
+
+    if (existing) {
+      // Merge quantities in Firestore
+      const newQty = parseFloat(existing.quantity || 0) + parseFloat(newItem.quantity || 0);
+      const low = isLowStock(existing.name, newQty.toString());
+      await updateDoc(doc(db, FRIDGE_COLLECTION, existing.docId), {
+        quantity: newQty.toString(),
+        lowStock: low
+      });
+    } else {
+      // Add new document to Firestore
+      const low = isLowStock(newItem.name, newItem.quantity);
+      await addDoc(collection(db, FRIDGE_COLLECTION), {
+        name: newItem.name,
+        quantity: newItem.quantity,
+        type: newItem.type,
+        expiry: newItem.expiry,
+        lowStock: low,
+        createdAt: Date.now()
+      });
+    }
 
     setNewItem({ name: '', quantity: '', type: 'pcs', expiry: '' });
     setShowAddModal(false);
   };
 
-  const addItemToGrocery = (name) => {
-    const item = { id: Date.now(), name, quantity: '1', type: 'pcs' };
-    setGroceryItems([...groceryItems, item]);
-  };
-
-  const purchaseItem = (id) => {
-    const purchasedItem = groceryItems.find(i => i.id === id);
-    setGroceryItems(groceryItems.filter(i => i.id !== id));
-    
-    setFridgeItems(prev => {
-      const existing = prev.find(item => item.name.toLowerCase() === purchasedItem.name.toLowerCase());
-      
-      if (existing) {
-        const newQty = parseFloat(existing.quantity || 0) + parseFloat(purchasedItem.quantity || 0);
-        const lowStockItems = ['egg', 'milk'];
-        const isLow = lowStockItems.includes(existing.name.toLowerCase()) && newQty <= 1;
-
-        return prev.map(item => 
-          item.id === existing.id 
-            ? { ...item, quantity: newQty.toString(), lowStock: isLow }
-            : item
-        );
-      } else {
-        const qtyNum = parseFloat(purchasedItem.quantity);
-        const lowStockItems = ['egg', 'milk'];
-        const isLow = lowStockItems.includes(purchasedItem.name.toLowerCase()) && qtyNum <= 1;
-        return [...prev, { ...purchasedItem, id: Date.now(), expiry: '', lowStock: isLow }];
-      }
+  const addItemToGrocery = async (name) => {
+    await addDoc(collection(db, GROCERY_COLLECTION), {
+      name,
+      quantity: '1',
+      type: 'pcs',
+      createdAt: Date.now()
     });
   };
 
-  const deleteFridgeItem = (id) => {
-    setFridgeItems(fridgeItems.filter(i => i.id !== id));
+  const purchaseItem = async (docId) => {
+    const purchasedItem = groceryItems.find(i => i.docId === docId);
+    // Remove from grocery list
+    await deleteDoc(doc(db, GROCERY_COLLECTION, docId));
+
+    // Add or merge into fridge
+    const existing = fridgeItems.find(item => item.name.toLowerCase() === purchasedItem.name.toLowerCase());
+    if (existing) {
+      const newQty = parseFloat(existing.quantity || 0) + parseFloat(purchasedItem.quantity || 0);
+      const low = isLowStock(existing.name, newQty.toString());
+      await updateDoc(doc(db, FRIDGE_COLLECTION, existing.docId), {
+        quantity: newQty.toString(),
+        lowStock: low
+      });
+    } else {
+      const low = isLowStock(purchasedItem.name, purchasedItem.quantity);
+      await addDoc(collection(db, FRIDGE_COLLECTION), {
+        name: purchasedItem.name,
+        quantity: purchasedItem.quantity,
+        type: purchasedItem.type,
+        expiry: '',
+        lowStock: low,
+        createdAt: Date.now()
+      });
+    }
   };
 
-  const deleteGroceryItem = (id) => {
-    setGroceryItems(groceryItems.filter(i => i.id !== id));
+  const deleteFridgeItem = async (docId) => {
+    await deleteDoc(doc(db, FRIDGE_COLLECTION, docId));
+  };
+
+  const deleteGroceryItem = async (docId) => {
+    await deleteDoc(doc(db, GROCERY_COLLECTION, docId));
   };
 
   // Recipe Suggestion Logic (MVP simple keyword matching)
@@ -140,6 +160,17 @@ function App() {
       fridgeItems.some(item => item.name.toLowerCase().includes(ing.toLowerCase()))
     )
   );
+
+  if (loading) {
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center', color: 'var(--primary)' }}>
+          <Loader2 size={40} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+          <p style={{ color: 'var(--text-muted)' }}>Loading your kitchen...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
@@ -197,7 +228,7 @@ function App() {
                 </div>
               ) : (
                 fridgeItems.map(item => (
-                  <div key={item.id} className="item-row">
+                  <div key={item.docId} className="item-row">
                     <div style={{ flex: 1 }}>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: '600' }}>{item.name}</h3>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.4rem' }}>
@@ -226,7 +257,7 @@ function App() {
                         </button>
                       )}
                       <button 
-                        onClick={() => deleteFridgeItem(item.id)} 
+                        onClick={() => deleteFridgeItem(item.docId)} 
                         style={{ background: 'none', border: 'none', color: '#ff7675', cursor: 'pointer', padding: '0.5rem' }}
                       >
                         <Trash2 size={18} />
@@ -272,10 +303,10 @@ function App() {
                 </div>
               ) : (
                 groceryItems.map(item => (
-                  <div key={item.id} className="item-row">
+                  <div key={item.docId} className="item-row">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
                       <button 
-                        onClick={() => purchaseItem(item.id)}
+                        onClick={() => purchaseItem(item.docId)}
                         className="btn-check"
                         style={{ 
                           border: '2px solid var(--secondary)', 
@@ -295,7 +326,7 @@ function App() {
                       <h3 style={{ fontSize: '1.05rem', fontWeight: '500' }}>{item.name}</h3>
                     </div>
                     <button 
-                      onClick={() => deleteGroceryItem(item.id)}
+                      onClick={() => deleteGroceryItem(item.docId)}
                       style={{ background: 'none', border: 'none', color: '#ff7675', cursor: 'pointer', padding: '0.5rem' }}
                     >
                       <Trash2 size={18} />
