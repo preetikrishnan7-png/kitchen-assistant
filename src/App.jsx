@@ -9,10 +9,13 @@ import {
   Calendar,
   CheckCircle2,
   Sparkles,
-  Loader2
+  Loader2,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from './firebase';
+import { db, auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import Auth from './Auth';
 import {
   collection,
   onSnapshot,
@@ -26,9 +29,6 @@ import {
   orderBy
 } from 'firebase/firestore';
 
-const FRIDGE_COLLECTION = 'fridgeItems';
-const GROCERY_COLLECTION = 'groceryItems';
-
 const LOW_STOCK_ITEMS = ['egg', 'milk'];
 
 function isLowStock(name, quantity) {
@@ -36,6 +36,7 @@ function isLowStock(name, quantity) {
 }
 
 function App() {
+  const [user, setUser] = useState(undefined); // undefined = checking, null = logged out
   const [fridgeItems, setFridgeItems] = useState([]);
   const [groceryItems, setGroceryItems] = useState([]);
   const [activeTab, setActiveTab] = useState('fridge');
@@ -43,15 +44,32 @@ function App() {
   const [newItem, setNewItem] = useState({ name: '', quantity: '', type: 'pcs', expiry: '' });
   const [loading, setLoading] = useState(true);
 
-  // Real-time listener for fridge items
+  // Auth state listener
   useEffect(() => {
-    const unsubFridge = onSnapshot(collection(db, FRIDGE_COLLECTION), (snapshot) => {
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u ?? null));
+    return unsub;
+  }, []);
+
+  // Real-time Firestore listeners (scoped per user)
+  useEffect(() => {
+    if (!user) {
+      setFridgeItems([]);
+      setGroceryItems([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const fridgeCol = collection(db, 'users', user.uid, 'fridgeItems');
+    const groceryCol = collection(db, 'users', user.uid, 'groceryItems');
+
+    const unsubFridge = onSnapshot(fridgeCol, (snapshot) => {
       const items = snapshot.docs.map(d => ({ docId: d.id, ...d.data() }));
       setFridgeItems(items);
       setLoading(false);
     });
 
-    const unsubGrocery = onSnapshot(collection(db, GROCERY_COLLECTION), (snapshot) => {
+    const unsubGrocery = onSnapshot(groceryCol, (snapshot) => {
       const items = snapshot.docs.map(d => ({ docId: d.id, ...d.data() }));
       setGroceryItems(items);
     });
@@ -60,7 +78,12 @@ function App() {
       unsubFridge();
       unsubGrocery();
     };
-  }, []);
+  }, [user]);
+
+  const fridgeCol = () => collection(db, 'users', user.uid, 'fridgeItems');
+  const groceryCol = () => collection(db, 'users', user.uid, 'groceryItems');
+  const fridgeDoc = (docId) => doc(db, 'users', user.uid, 'fridgeItems', docId);
+  const groceryDoc = (docId) => doc(db, 'users', user.uid, 'groceryItems', docId);
 
   const addItemToFridge = async () => {
     if (!newItem.name) return;
@@ -68,17 +91,12 @@ function App() {
     const existing = fridgeItems.find(item => item.name.toLowerCase() === newItem.name.toLowerCase());
 
     if (existing) {
-      // Merge quantities in Firestore
       const newQty = parseFloat(existing.quantity || 0) + parseFloat(newItem.quantity || 0);
       const low = isLowStock(existing.name, newQty.toString());
-      await updateDoc(doc(db, FRIDGE_COLLECTION, existing.docId), {
-        quantity: newQty.toString(),
-        lowStock: low
-      });
+      await updateDoc(fridgeDoc(existing.docId), { quantity: newQty.toString(), lowStock: low });
     } else {
-      // Add new document to Firestore
       const low = isLowStock(newItem.name, newItem.quantity);
-      await addDoc(collection(db, FRIDGE_COLLECTION), {
+      await addDoc(fridgeCol(), {
         name: newItem.name,
         quantity: newItem.quantity,
         type: newItem.type,
@@ -93,7 +111,7 @@ function App() {
   };
 
   const addItemToGrocery = async (name) => {
-    await addDoc(collection(db, GROCERY_COLLECTION), {
+    await addDoc(groceryCol(), {
       name,
       quantity: '1',
       type: 'pcs',
@@ -103,21 +121,16 @@ function App() {
 
   const purchaseItem = async (docId) => {
     const purchasedItem = groceryItems.find(i => i.docId === docId);
-    // Remove from grocery list
-    await deleteDoc(doc(db, GROCERY_COLLECTION, docId));
+    await deleteDoc(groceryDoc(docId));
 
-    // Add or merge into fridge
     const existing = fridgeItems.find(item => item.name.toLowerCase() === purchasedItem.name.toLowerCase());
     if (existing) {
       const newQty = parseFloat(existing.quantity || 0) + parseFloat(purchasedItem.quantity || 0);
       const low = isLowStock(existing.name, newQty.toString());
-      await updateDoc(doc(db, FRIDGE_COLLECTION, existing.docId), {
-        quantity: newQty.toString(),
-        lowStock: low
-      });
+      await updateDoc(fridgeDoc(existing.docId), { quantity: newQty.toString(), lowStock: low });
     } else {
       const low = isLowStock(purchasedItem.name, purchasedItem.quantity);
-      await addDoc(collection(db, FRIDGE_COLLECTION), {
+      await addDoc(fridgeCol(), {
         name: purchasedItem.name,
         quantity: purchasedItem.quantity,
         type: purchasedItem.type,
@@ -129,11 +142,11 @@ function App() {
   };
 
   const deleteFridgeItem = async (docId) => {
-    await deleteDoc(doc(db, FRIDGE_COLLECTION, docId));
+    await deleteDoc(fridgeDoc(docId));
   };
 
   const deleteGroceryItem = async (docId) => {
-    await deleteDoc(doc(db, GROCERY_COLLECTION, docId));
+    await deleteDoc(groceryDoc(docId));
   };
 
   // Recipe Suggestion Logic (MVP simple keyword matching)
@@ -161,6 +174,20 @@ function App() {
     )
   );
 
+  // Show splash while checking auth
+  if (user === undefined) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #fff5f5 0%, #f0fff4 100%)' }}>
+        <div style={{ textAlign: 'center', color: '#ff6b6b' }}>
+          <Loader2 size={40} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+        </div>
+      </div>
+    );
+  }
+
+  // Show auth screen when not logged in
+  if (!user) return <Auth />;
+
   if (loading) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -174,9 +201,20 @@ function App() {
 
   return (
     <div className="app-container">
-      <header style={{ marginBottom: '1.5rem', textAlign: 'center', paddingTop: '1rem' }}>
-        <h1 style={{ color: 'var(--primary)', marginBottom: '0.2rem', fontSize: '1.8rem' }}>Smart Kitchen</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Helping Moms stay organized ✨</p>
+      <header style={{ marginBottom: '1.5rem', paddingTop: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ color: 'var(--primary)', marginBottom: '0.1rem', fontSize: '1.8rem' }}>Smart Kitchen</h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Hi, {user.displayName || user.email?.split('@')[0]} ✨</p>
+          </div>
+          <button
+            onClick={() => signOut(auth)}
+            title="Sign out"
+            style={{ background: 'rgba(255,107,107,0.1)', border: 'none', borderRadius: '0.8rem', padding: '0.6rem', cursor: 'pointer', color: '#ff6b6b', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '600', fontSize: '0.85rem', fontFamily: "'Outfit', sans-serif" }}
+          >
+            <LogOut size={18} /> Sign out
+          </button>
+        </div>
       </header>
 
       {/* Stats Quick View */}
